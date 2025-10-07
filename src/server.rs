@@ -26,8 +26,6 @@ fn main() {
         match request_type {
             RequestType::QUERY => {
                 let req1: QueryRequest = QueryRequest::deserialize(&buf[..bytes], &mut pos);
-                // println!("{:?}", all_facilities[&req1.name][req1.days[0]]);
-                // println!("{:?}, {}", req1, bytes);
                 let mut availaiblilty: Vec<u8> = Vec::new();
                 let facility = all_facilities[&req1.name]; // handle error
                 for day in req1.days {
@@ -41,20 +39,17 @@ fn main() {
 
             RequestType::BOOK => {
                 let booking: Booking = Booking::deserialize(&buf[..bytes], &mut pos);
-                println!("{:?}", booking);
                 let facility = all_facilities.get_mut(&booking.facility_name);
                 match facility {
                     Some(record) => {
                         let booking_status = record.is_slot_availaible(booking.day, booking.start_slot, booking.num_slots, booking.user_id);
                         match booking_status {
                             true => {
-                                // println!("{:?}", all_facilities);
                                 booking_counter += 1;
                                 booking_list.insert(booking_counter, booking);
                                 let booking_response: BookingResponse = BookingResponse { success: true, message: "Booking Successful".to_string(), confirmation_id: booking_counter };
                                 let mut output_stream: Vec<u8> = Vec::new();
                                 booking_response.serialize(&mut output_stream);
-                                println!("{:?}", output_stream);
                                 socket.send_to(&output_stream, addr).unwrap();
 
                                 output_stream = Vec::new();
@@ -94,7 +89,6 @@ fn main() {
                                 let new_start = booking.start_slot as i8 + update_request.offset;
 
                                 booking.start_slot = new_start as u8; // check for subtraction
-                                // println!("{:?},\n {:?} ", all_facilities, booking_list);
                                 let update_response: UpdateResponse = UpdateResponse { success: true, message: "Booking updated".to_string() };
                                 let mut output_stream: Vec<u8> = Vec::new();
                                 update_response.serialize(&mut output_stream);

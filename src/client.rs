@@ -157,7 +157,7 @@ fn main() {
             let (num_bytes, _) = socket.recv_from(&mut buf).unwrap();
             let mut pos = 0;
             let resp = UpdateResponse::deserialize(&buf[..num_bytes], &mut pos);
-            println!("Booking Response: {:?}", resp);
+            println!("Update Response: {:?}", resp);
         }
 
         Commands::Monitor { duration } => {
@@ -177,7 +177,6 @@ fn main() {
                 match socket.recv_from(&mut buf) {
                     Ok((num_bytes, src_addr)) => {
                         let mut pos = 0;
-                        println!("Received {} bytes from {}", num_bytes, src_addr);
                         let facility: FacilityRecord = FacilityRecord::deserialize(&buf[..num_bytes], &mut pos);
                         println!("{}", facility);
                     }
