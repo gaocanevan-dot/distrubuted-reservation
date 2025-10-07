@@ -54,7 +54,6 @@ impl Booking {
         output_stream.push(self.start_slot);
         output_stream.push(self.num_slots);
         output_stream.push(self.user_id);
-        println!("{:?}", output_stream);
     }
     pub fn deserialize(input_stream: &[u8], pos: &mut usize) -> Self {
         let facility_name = read_string(input_stream, pos);
@@ -89,7 +88,6 @@ impl BookingResponse {
     pub fn deserialize(input_stream: &[u8], pos: &mut usize) -> Self {
         let success: bool = input_stream[*pos] != 0;
         *pos += 1;
-        println!("{:?}", success);
         let message: String = read_string(input_stream, pos);
         let confirmation_id: u8 = input_stream[*pos];
         *pos += 1;
@@ -107,7 +105,6 @@ impl Update {
     pub fn serialize(&self, output_stream: &mut Vec<u8>) {
         output_stream.push(self.confirmation_id);
         output_stream.push(self.offset as u8);
-        println!("{:?}", output_stream);
     }
 
     pub fn deserialize(input_stream: &[u8], pos: &mut usize) -> Self {
@@ -197,7 +194,6 @@ impl QueryRequest {
             let u8_day = *day as u8;
             output_stream.push(u8_day);
         }
-        println!("{:?}", output_stream);
     }
 
     pub fn deserialize(input_stream: &[u8], pos: &mut usize) -> Self {
