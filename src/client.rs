@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::{net::UdpSocket};
 use clap::{Parser, Subcommand};
 use std::fmt;
@@ -93,18 +94,38 @@ fn main() {
     let cli = Cli::parse();
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     let server_address = cli.server;
-
+    
+    socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     match cli.command {
         Commands::Query { name, days } => {
             let days: Vec<Day> = days.iter().map(|d| Day::from(d.as_str())).collect();
             let no_of_days = days.len();
             let req = QueryRequest { name, days };
+            let num_bytes: usize;
             let mut output_stream = vec![RequestType::QUERY as u8];
             req.serialize(&mut output_stream);
             socket.send_to(&output_stream, &server_address).unwrap();
-
             let mut buf = [0; 1024];
-            let (num_bytes, _) = socket.recv_from(&mut buf).unwrap();
+            loop {
+                match socket.recv_from(&mut buf) {
+                    Ok((bytes, src_addr)) => {
+                        // Success: data received
+                        num_bytes = bytes;
+                        println!("Received {} bytes from {}", num_bytes, src_addr);
+                        break;
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
+                        // Timeout Occurred
+                        println!("Timeout: No data received after 5 seconds.");
+                        socket.send_to(&output_stream, &server_address).unwrap();
+                        continue;
+                    }
+                    Err(e) => {
+                        // Other I/O error
+                        eprintln!("An I/O error occurred: {}", e.kind());
+                    }
+                }
+            }
             let mut pos = 0;
             let resp = QueryResponse::deserialize(&buf[..num_bytes], &mut pos);
             let mut records: Vec<Record> = Vec::new();
@@ -134,9 +155,30 @@ fn main() {
             let mut output_stream = vec![RequestType::BOOK as u8];
             booking.serialize(&mut output_stream);
             socket.send_to(&output_stream, &server_address).unwrap();
+            let num_bytes: usize;
 
             let mut buf = [0; 1024];
-            let (num_bytes, _) = socket.recv_from(&mut buf).unwrap();
+            loop {
+                match socket.recv_from(&mut buf) {
+                    Ok((bytes, src_addr)) => {
+                        // Success: data received
+                        num_bytes = bytes;
+                        println!("Received {} bytes from {}", num_bytes, src_addr);
+                        break;
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
+                        // Timeout Occurred
+                        println!("Timeout: No data received after 5 seconds.");
+                        socket.send_to(&output_stream, &server_address).unwrap();
+                        continue;
+                    }
+                    Err(e) => {
+                        // Other I/O error
+                        eprintln!("An I/O error occurred: {}", e.kind());
+                    }
+                }
+            }
+            // let (num_bytes, _) = socket.recv_from(&mut buf).unwrap();
             let mut pos = 0;
             let resp = BookingResponse::deserialize(&buf[..num_bytes], &mut pos);
             println!("Booking Response: {:?}", resp);

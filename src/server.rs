@@ -1,4 +1,4 @@
-use std::{collections::{HashMap}, net::{SocketAddr, UdpSocket}};
+use std::{collections::HashMap, net::{SocketAddr, UdpSocket}, thread, time::Duration};
 pub mod message;
 use message::{FacilityRecord, RequestType, QueryRequest, QueryResponse, Booking, BookingResponse, Update, UpdateResponse, Monitor};
 
@@ -18,7 +18,20 @@ fn main() {
     let mut buf:[u8;1024] = [0; 1024];
 
     loop {
-        let (bytes, addr) = socket.recv_from(&mut buf).unwrap();
+        let bytes: usize;
+        let addr: SocketAddr;
+        match socket.recv_from(&mut buf) {
+            Ok((num_bytes, src_addr)) => {
+                // Success: data received
+                bytes = num_bytes;
+                addr = src_addr;
+            }
+            Err(e) => {
+                // Other I/O error
+                eprintln!("An I/O error occurred: {}", e.kind());
+                continue;
+            }
+        }
 
         let mut pos = 0;
         let request_type: RequestType = RequestType::from(buf[pos]);
@@ -34,6 +47,7 @@ fn main() {
                 let mut query_response: QueryResponse = QueryResponse { name: req1.name, availaible: availaiblilty };
                 let mut output_stream: Vec<u8> = Vec::new();
                 query_response.serialize(&mut output_stream);
+                thread::sleep(Duration::from_secs(10));
                 socket.send_to(&output_stream, addr).unwrap();
             }
 
@@ -50,6 +64,7 @@ fn main() {
                                 let booking_response: BookingResponse = BookingResponse { success: true, message: "Booking Successful".to_string(), confirmation_id: booking_counter };
                                 let mut output_stream: Vec<u8> = Vec::new();
                                 booking_response.serialize(&mut output_stream);
+                                thread::sleep(Duration::from_secs(10));
                                 socket.send_to(&output_stream, addr).unwrap();
 
                                 output_stream = Vec::new();
@@ -92,6 +107,7 @@ fn main() {
                                 let update_response: UpdateResponse = UpdateResponse { success: true, message: "Booking updated".to_string() };
                                 let mut output_stream: Vec<u8> = Vec::new();
                                 update_response.serialize(&mut output_stream);
+                                thread::sleep(Duration::from_secs(10));
                                 socket.send_to(&output_stream, addr).unwrap();
 
                             },
