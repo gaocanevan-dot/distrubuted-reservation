@@ -5,6 +5,7 @@ from typing import List
 import struct
 
 
+
 def write_u8(buf: bytearray, v: int) -> None:
     buf.append(v & 0xFF)
 
@@ -136,16 +137,25 @@ class Update:
         write_i8(buf, self.offset)
         return bytes(buf)
 
+# @dataclass
+# class UpdateResponse:
+#     status: int  
+
+#     @classmethod
+#     def deserialize(cls, b: bytes, pos: int = 0) -> "UpdateResponse":
+#         status, pos = read_u8(b, pos)
+#         msg, pos = read_string(b, pos)
+#         return cls(status=status, message=msg)
 @dataclass
 class UpdateResponse:
-    status: int  
+    status: int   # 0 success, 1 failure
+    message: str
 
     @classmethod
     def deserialize(cls, b: bytes, pos: int = 0) -> "UpdateResponse":
         status, pos = read_u8(b, pos)
         msg, pos = read_string(b, pos)
         return cls(status=status, message=msg)
-
 
 @dataclass
 class Monitor:
