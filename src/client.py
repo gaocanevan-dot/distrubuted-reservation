@@ -2,25 +2,26 @@
 import argparse
 import socket
 import time
+from typing import Dict
 
 from message import (
     RequestType, Day,
     QueryRequest, QueryResponse,
     Booking, BookingResponse,
     Update, UpdateResponse,
-    Monitor, FacilityRecord
+    Monitor, FacilityRecord,
+    read_string, read_u8
 )
 
-
+# ----------- 工具：打印 16 个半小时槽 -----------
 def print_slots(day_slots: bytes) -> None:
-    # 槽 0..15 映射 08:00..15:30（每 30min）
     for i, v in enumerate(day_slots):
         hour = 8 + i // 2
         minute = "00" if i % 2 == 0 else "30"
         status = "Available" if v == 0 else f"Booked by {v}"
         print(f"{hour:02d}:{minute} - {status}")
 
-
+# ----------- 全局 req_id（0..255 循环）-----------
 _next_req_id = -1
 def next_req_id() -> int:
     global _next_req_id
@@ -34,11 +35,7 @@ def send_and_recv(sock: socket.socket,
                   timeout_s: float = 3.0,
                   retries: int = 2,
                   semantics: str = "alo") -> bytes:
-    """
-    semantics:
-      - "alo": at-least-once（超时就重发，共 retries+1 次机会）
-      - "amo": at-most-once（只发一次，超时不重发）
-    """
+
     sock.settimeout(timeout_s)
     attempts = 1 if semantics == "amo" else (retries + 1)
     last_err = None
@@ -75,11 +72,11 @@ def main():
 
     # book
     p_book = subparsers.add_parser("book", help="book a facility")
-    p_book.add_argument("-n", "--name", required=True, help="facility name")
-    p_book.add_argument("-d", "--day", required=True, help="day, e.g. monday")
-    p_book.add_argument("-s", "--start-slot", required=True, type=int, help="start slot (0..15)")
+    p_book.add_argument("--name", required=True, help="facility name")
+    p_book.add_argument("--day", required=True, help="day, e.g. monday")
+    p_book.add_argument("--start-slot", required=True, type=int, help="start slot (0..15)")
     p_book.add_argument("--num-slots", required=True, type=int, help="number of slots")
-    p_book.add_argument("-u", "--user-id", required=True, type=int, help="user id (0..255)")
+    p_book.add_argument("--user-id", required=True, type=int, help="user id (0..255)")
 
     # update
     p_update = subparsers.add_parser("update", help="update an existing booking by confirmation id and offset")
@@ -89,6 +86,8 @@ def main():
     # monitor
     p_monitor = subparsers.add_parser("monitor", help="monitor facility updates for duration seconds")
     p_monitor.add_argument("-d", "--duration", required=True, type=int, help="duration seconds")
+    p_monitor.add_argument("-n", "--name", default=None,
+                           help="(optional) facility name hint for title only")
 
     args = parser.parse_args()
 
@@ -113,12 +112,11 @@ def main():
         data = send_and_recv(sock, server_addr, bytes(output),
                              timeout_s=args.timeout, retries=args.retries, semantics=args.semantics)
 
-        # 跳过 [resp_type][resp_id]
         pos = 2
         resp = QueryResponse.deserialize(data, pos)
 
         for i in range(len(days)):
-            day_slots = resp.available[i*16:(i+1)*16]
+            day_slots = resp.available[i * 16:(i + 1) * 16]
             print(f"\n{days[i].name}:")
             print_slots(day_slots)
 
@@ -142,46 +140,62 @@ def main():
         resp = BookingResponse.deserialize(data, pos)
         print(f"Booking Response: confirmation_id={resp.confirmation_id}, message={resp.message}")
 
+    
     elif args.command == "update":
-        upd = Update(confirmation_id=args.confirmation_id, offset=args.offset)
+         upd = Update(confirmation_id=args.confirmation_id, offset=args.offset)
+         rid = next_req_id()
+         output = bytearray([RequestType.UPDATE.value, rid])
+         output.extend(upd.serialize())
 
-        rid = next_req_id()
-        output = bytearray([RequestType.UPDATE.value, rid])
-        output.extend(upd.serialize())
+         data = send_and_recv(sock, server_addr, bytes(output),
+                         timeout_s=args.timeout, retries=args.retries, semantics=args.semantics)
 
-        data = send_and_recv(sock, server_addr, bytes(output),
-                             timeout_s=args.timeout, retries=args.retries, semantics=args.semantics)
+    # --- 新增：响应头校验 ---
+         resp_type = data[0]
+         resp_id   = data[1]
+         if resp_type != RequestType.UPDATE.value:
+             print(f"[WARN] unexpected resp_type={resp_type} (expect UPDATE=2), resp_id={resp_id}")
+         if resp_id != rid:
+              print(f"[WARN] mismatched resp_id={resp_id} (expect {rid})")
+   
+         pos = 2
+         resp = UpdateResponse.deserialize(data, pos)
+         ok = "success" if resp.status == 0 else "failure"   # 修正成功/失败判断
+         print(f"Update Response: {ok}, message={resp.message}")
 
-        pos = 2
-        resp = UpdateResponse.deserialize(data, pos)
-        ok = "success" if resp.status == 0 else "failure"
-        print(f"Update Response: {ok}, message={resp.message}")
 
     elif args.command == "monitor":
-        # 注册监控：发送 [MONITOR][req_id] + duration
         rid = next_req_id()
         mon = Monitor(duration=args.duration)
         output = bytearray([RequestType.MONITOR.value, rid])
         output.extend(mon.serialize())
         sock.sendto(bytes(output), server_addr)
 
-        sock.settimeout(10.0)
+        sock.settimeout(5.0)
         start_time = time.time()
         print(f"Monitoring for {args.duration} seconds...")
 
         while time.time() - start_time < args.duration:
             try:
-                data, _ = sock.recvfrom(4096)
-                pos = 2  # 跳过 [resp_type][resp_id]
-                facility = FacilityRecord.deserialize(data, pos)
-                print(str(facility))
+                data, _addr = sock.recvfrom(4096)
+
+                try:
+                    # 服务器直接发送 MonitoringUpdate，没有类型和ID头
+                    # 直接从头开始解析
+                    record = FacilityRecord.deserialize(data, 0)
+                    print(str(record))
+                except Exception as parse_err:
+                    print(f"Error parsing facility update: {parse_err}")
+                    continue
+                
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"An error occurred while monitoring: {e}")
+                continue
 
-        # 结束时尝试取消订阅（若服务端支持：duration=0）
         try:
+            # 取消订阅
             rid = next_req_id()
             cancel = Monitor(duration=0)
             output = bytearray([RequestType.MONITOR.value, rid])
@@ -189,11 +203,7 @@ def main():
             sock.sendto(bytes(output), server_addr)
         except Exception:
             pass
-
         print(f"Monitoring ended after {args.duration} seconds.")
-
-    else:
-        raise RuntimeError(f"Unknown command: {args.command}")
 
 if __name__ == "__main__":
     main()
