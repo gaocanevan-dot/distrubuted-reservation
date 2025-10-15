@@ -122,7 +122,7 @@ class BookingResponse:
 
     @classmethod
     def deserialize(cls, b: bytes, pos: int = 0) -> "BookingResponse":
-        cid, pos = read_u8(b, pos)
+        cid, pos = read_u32_le(b, pos)
         msg, pos = read_string(b, pos)
         return cls(confirmation_id=cid, message=msg)
 
@@ -133,7 +133,7 @@ class Update:
     offset: int  
     def serialize(self) -> bytes:
         buf = bytearray()
-        write_u8(buf, self.confirmation_id)
+        write_u32_le(buf, self.confirmation_id)
         write_i8(buf, self.offset)
         return bytes(buf)
 
@@ -173,29 +173,39 @@ class Record:
 
 @dataclass
 class FacilityRecord:
+    """
+    Represents the full weekly schedule for a facility.
+    The server sends the complete record (all days) upon any change.
+    """
     name: str
-    day: Day
-    availability: Record
+    schedule: dict[Day, bytes]  # Maps Day enum to 16-byte slot data
 
     @classmethod
     def deserialize(cls, b: bytes, pos: int = 0) -> "FacilityRecord":
+        # The server sends: facility_name (string) + full record (5 days * 16 bytes)
         name, pos = read_string(b, pos)
-        day_u8, pos = read_u8(b, pos)
-        if pos + 16 > len(b):
-            raise ValueError("Buffer overflow while reading FacilityRecord availability")
-        slots = b[pos:pos+16]
-        pos += 16
-        return cls(name=name, day=Day(day_u8), availability=Record(slots=slots))
+
+        schedule = {}
+        # The Rust server sends Monday through Friday
+        days_in_order = [Day.Monday, Day.Tuesday, Day.Wednesday, Day.Thursday, Day.Friday]
+        
+        for day in days_in_order:
+            num_slots = 16
+            if pos + num_slots > len(b):
+                raise ValueError(f"Buffer overflow while reading schedule for {day.name}")
+            schedule[day] = b[pos:pos+num_slots]
+            pos += num_slots
+            
+        return cls(name=name, schedule=schedule)
 
     def __str__(self) -> str:
-        lines = [f"--- Facility Update ---",
-                 f"Facility: {self.name}",
-                 f"Day: {self.day.name}"]
-    
-        for i, v in enumerate(self.availability.slots):
-            hour = 8 + i // 2
-            minute = "00" if i % 2 == 0 else "30"
-            status = "Available" if v == 0 else f"Booked by {v}"
-            lines.append(f"{hour:02d}:{minute} - {status}")
+        lines = [f"--- Facility Update: {self.name} ---"]
+        for day, slots in self.schedule.items():
+            lines.append(f"\n{day.name}:")
+            for i, v in enumerate(slots):
+                hour = 8 + i // 2
+                minute = "00" if i % 2 == 0 else "30"
+                status = "Available" if v == 0 else f"Booked by {v}"
+                lines.append(f"  {hour:02d}:{minute} - {status}")
         lines.append("-----------------------")
         return "\n".join(lines)
