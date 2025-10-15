@@ -13,7 +13,6 @@ from message import (
     read_string, read_u8
 )
 
-# ----------- 工具：打印 16 个半小时槽 -----------
 def print_slots(day_slots: bytes) -> None:
     for i, v in enumerate(day_slots):
         hour = 8 + i // 2
@@ -21,14 +20,12 @@ def print_slots(day_slots: bytes) -> None:
         status = "Available" if v == 0 else f"Booked by {v}"
         print(f"{hour:02d}:{minute} - {status}")
 
-# ----------- 全局 req_id（0..255 循环）-----------
 _next_req_id = -1
 def next_req_id() -> int:
     global _next_req_id
     _next_req_id = (_next_req_id + 1) & 0xFF
     return _next_req_id
 
-# ----------- 统一发送/接收（含超时与重试）-----------
 def send_and_recv(sock: socket.socket,
                   server_addr,
                   out_bytes: bytes,
@@ -180,8 +177,7 @@ def main():
                 data, _addr = sock.recvfrom(4096)
 
                 try:
-                    # 服务器直接发送 MonitoringUpdate，没有类型和ID头
-                    # 直接从头开始解析
+                
                     record = FacilityRecord.deserialize(data, 0)
                     print(str(record))
                 except Exception as parse_err:
@@ -195,7 +191,7 @@ def main():
                 continue
 
         try:
-            # 取消订阅
+    
             rid = next_req_id()
             cancel = Monitor(duration=0)
             output = bytearray([RequestType.MONITOR.value, rid])
